@@ -40,9 +40,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/moche-ai/mcp-knowledge-graph"
+Homepage = "https://github.com/jutalik/mcp-knowledge-graph"
 Documentation = "https://mcp.moche.ai/docs"
-Repository = "https://github.com/moche-ai/mcp-knowledge-graph"
+Repository = "https://github.com/jutalik/mcp-knowledge-graph"
 
 [project.scripts]
 mcp-kg-server = "src.main:main"
