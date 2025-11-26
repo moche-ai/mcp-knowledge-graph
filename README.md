@@ -71,6 +71,10 @@ mcp-kg-server
 | `get_alternatives` | Find alternative technologies/tools |
 | `get_best_practices` | Get recommendations and pitfall warnings |
 | `get_stats` | Get knowledge graph statistics |
+| `infer_relation` | Infer relationships between two technologies |
+| `find_path` | Find connection paths between concepts |
+| `recommend` | Get technology recommendations (similar, alternative, complement) |
+| `find_similar` | Find similar technologies by category/tags |
 
 ## Usage Examples
 
@@ -116,6 +120,10 @@ curl -X POST https://mcp.moche.ai/mcp/tools/call \
 | `/knowledge/search` | GET | REST search endpoint |
 | `/knowledge/context/{name}` | GET | REST context endpoint |
 | `/knowledge/stats` | GET | Graph statistics |
+| `/knowledge/infer/relation` | GET | Infer relations between technologies |
+| `/knowledge/infer/path` | GET | Find paths between concepts |
+| `/knowledge/recommend/{name}` | GET | Get recommendations |
+| `/knowledge/similar/{name}` | GET | Find similar technologies |
 | `/docs` | GET | OpenAPI documentation |
 
 ## Configuration
@@ -151,6 +159,16 @@ Contributions welcome! Please:
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+## Support
+
+If you find this project helpful, consider supporting its development:
+
+- ⭐ Star this repository
+- 🐛 Report issues or suggest features
+- 💬 Share with others
+
+`ETH: 0x0000C4CE7f73886Cce8C43d4b481f0cBEbAC0000`
 
 ## Links
 

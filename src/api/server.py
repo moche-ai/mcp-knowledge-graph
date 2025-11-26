@@ -159,6 +159,91 @@ MCP_TOOLS: List[MCPTool] = [
             "properties": {},
         }
     ),
+    MCPTool(
+        name="infer_relation",
+        description="Infer the relationship between two technologies or concepts using graph traversal.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "First technology/concept name"
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Second technology/concept name"
+                }
+            },
+            "required": ["source", "target"]
+        }
+    ),
+    MCPTool(
+        name="find_path",
+        description="Find connection paths between two technologies in the knowledge graph.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "Starting technology name"
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Target technology name"
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Maximum path depth (default 4)",
+                    "default": 4
+                }
+            },
+            "required": ["source", "target"]
+        }
+    ),
+    MCPTool(
+        name="recommend",
+        description="Get technology recommendations based on graph relationships.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "technology": {
+                    "type": "string",
+                    "description": "Base technology to get recommendations for"
+                },
+                "type": {
+                    "type": "string",
+                    "description": "Recommendation type: all, alternative, complement",
+                    "enum": ["all", "alternative", "complement"],
+                    "default": "all"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum recommendations (default 10)",
+                    "default": 10
+                }
+            },
+            "required": ["technology"]
+        }
+    ),
+    MCPTool(
+        name="find_similar",
+        description="Find similar technologies based on category and tags.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "technology": {
+                    "type": "string",
+                    "description": "Technology to find similar ones for"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results (default 10)",
+                    "default": 10
+                }
+            },
+            "required": ["technology"]
+        }
+    ),
 ]
 
 
@@ -254,6 +339,61 @@ async def _execute_tool(graph: KnowledgeGraph, tool_name: str, args: Dict[str, A
     
     elif tool_name == "get_stats":
         return await graph.get_stats()
+    
+    elif tool_name == "infer_relation":
+        from ..knowledge.inference import GraphInference
+        inference = GraphInference()
+        result = await inference.find_relation(
+            source=args.get("source", ""),
+            target=args.get("target", ""),
+        )
+        return {
+            "query": result.query,
+            "result": result.result,
+            "confidence": result.confidence,
+            "reasoning": result.reasoning_path,
+        }
+    
+    elif tool_name == "find_path":
+        from ..knowledge.inference import GraphInference
+        inference = GraphInference()
+        result = await inference.find_path(
+            source=args.get("source", ""),
+            target=args.get("target", ""),
+            max_depth=args.get("max_depth", 4),
+        )
+        return {
+            "query": result.query,
+            "result": result.result,
+            "confidence": result.confidence,
+        }
+    
+    elif tool_name == "recommend":
+        from ..knowledge.inference import GraphInference
+        inference = GraphInference()
+        result = await inference.recommend(
+            technology=args.get("technology", ""),
+            relation_type=args.get("type", "all"),
+            limit=args.get("limit", 10),
+        )
+        return {
+            "query": result.query,
+            "result": result.result,
+            "confidence": result.confidence,
+        }
+    
+    elif tool_name == "find_similar":
+        from ..knowledge.inference import GraphInference
+        inference = GraphInference()
+        result = await inference.find_similar(
+            technology=args.get("technology", ""),
+            limit=args.get("limit", 10),
+        )
+        return {
+            "query": result.query,
+            "result": result.result,
+            "confidence": result.confidence,
+        }
     
     else:
         raise ValueError(f"Unknown tool: {tool_name}")
@@ -371,6 +511,64 @@ async def knowledge_context(name: str):
         }
     finally:
         await graph.disconnect()
+
+
+# ==================== Inference REST API ====================
+
+@app.get("/knowledge/infer/relation")
+async def infer_relation(source: str, target: str):
+    """Find relationships between two technologies."""
+    from ..knowledge.inference import GraphInference
+    inference = GraphInference()
+    result = await inference.find_relation(source, target)
+    return {
+        "query": result.query,
+        "result": result.result,
+        "confidence": result.confidence,
+        "reasoning": result.reasoning_path,
+    }
+
+
+@app.get("/knowledge/infer/path")
+async def find_path(source: str, target: str, max_depth: int = 4):
+    """Find connection paths between technologies."""
+    from ..knowledge.inference import GraphInference
+    inference = GraphInference()
+    result = await inference.find_path(source, target, max_depth)
+    return {
+        "source": source,
+        "target": target,
+        "paths": result.result.get("paths", []),
+        "shortest": result.result.get("shortest"),
+        "confidence": result.confidence,
+    }
+
+
+@app.get("/knowledge/recommend/{technology}")
+async def recommend(technology: str, type: str = "all", limit: int = 10):
+    """Get technology recommendations."""
+    from ..knowledge.inference import GraphInference
+    inference = GraphInference()
+    result = await inference.recommend(technology, type, limit)
+    return {
+        "base": technology,
+        "type": type,
+        "recommendations": result.result.get("recommendations", []),
+        "confidence": result.confidence,
+    }
+
+
+@app.get("/knowledge/similar/{technology}")
+async def find_similar(technology: str, limit: int = 10):
+    """Find similar technologies."""
+    from ..knowledge.inference import GraphInference
+    inference = GraphInference()
+    result = await inference.find_similar(technology, limit)
+    return {
+        "base": technology,
+        "similar": result.result.get("similar", []),
+        "confidence": result.confidence,
+    }
 
 
 # Register MCP router
