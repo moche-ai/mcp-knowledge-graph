@@ -2,10 +2,10 @@
 services:
   mcp-knowledge-graph:
     build: .
-    container_name: mcp-kg
+    container_name: mcp-kg-public
     restart: unless-stopped
     ports:
-      - "${MCP_PORT:-8780}:8780"
+      - "${MCP_PUBLIC_PORT:-8781}:8780"
     environment:
       - NEO4J_URI=${NEO4J_URI:-bolt://localhost:7687}
       - NEO4J_USER=${NEO4J_USER:-neo4j}
