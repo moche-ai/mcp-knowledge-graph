@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, ClassVar
 
 from neo4j import AsyncGraphDatabase
 
@@ -19,33 +19,112 @@ class KnowledgeGraph:
     - Trust score tracking
     - Relationship traversal
     - Pattern matching queries
+    - Shared driver pattern (singleton)
     """
     
-    def __init__(self):
-        self._driver = None
+    # 클래스 레벨 공유 드라이버
+    _shared_driver: ClassVar[Optional[Any]] = None
+    _initialized: ClassVar[bool] = False
+    
+    def __init__(self, use_shared: bool = True):
+        """
+        Initialize KnowledgeGraph.
+        
+        Args:
+            use_shared: 공유 드라이버 사용 여부 (기본값 True)
+        """
+        self._use_shared = use_shared
+        self._local_driver = None
+    
+    @classmethod
+    async def get_shared_driver(cls):
+        """Get or create shared Neo4j driver."""
+        if cls._shared_driver is None and config.neo4j_password:
+            try:
+                cls._shared_driver = AsyncGraphDatabase.driver(
+                    config.neo4j_uri,
+                    auth=(config.neo4j_user, config.neo4j_password),
+                )
+                cls._initialized = True
+            except Exception as e:
+                print(f"Neo4j connection error: {e}")
+                return None
+        return cls._shared_driver
+    
+    @classmethod
+    async def close_shared_driver(cls):
+        """Close shared driver."""
+        if cls._shared_driver:
+            await cls._shared_driver.close()
+            cls._shared_driver = None
+            cls._initialized = False
+    
+    @property
+    def _driver(self):
+        """Get driver (shared or local)."""
+        if self._use_shared:
+            return self._shared_driver
+        return self._local_driver
     
     async def connect(self):
         """Connect to Neo4j database."""
-        if not self._driver and config.neo4j_password:
-            self._driver = AsyncGraphDatabase.driver(
+        if self._use_shared:
+            await self.get_shared_driver()
+        elif not self._local_driver and config.neo4j_password:
+            self._local_driver = AsyncGraphDatabase.driver(
                 config.neo4j_uri,
                 auth=(config.neo4j_user, config.neo4j_password),
             )
     
     async def disconnect(self):
         """Disconnect from Neo4j database."""
-        if self._driver:
-            await self._driver.close()
-            self._driver = None
+        # 공유 드라이버는 여기서 닫지 않음
+        if not self._use_shared and self._local_driver:
+            await self._local_driver.close()
+            self._local_driver = None
+    
+    async def run_query(
+        self, 
+        query: str, 
+        params: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Execute a Cypher query and return results.
+        
+        Args:
+            query: Cypher query string
+            params: Query parameters
+            
+        Returns:
+            List of result records as dictionaries
+        """
+        await self.connect()
+        
+        results = []
+        driver = self._driver
+        
+        if not driver:
+            return results
+        
+        try:
+            async with driver.session() as session:
+                result = await session.run(query, params or {})
+                async for record in result:
+                    results.append(dict(record))
+        except Exception as e:
+            print(f"Query error: {e}")
+        
+        return results
     
     async def get_entity(self, name: str) -> Optional[Dict[str, Any]]:
         """Get an entity by name."""
         await self.connect()
         
-        if not self._driver:
+        driver = self._driver
+        if not driver:
             return None
         
-        async with self._driver.session() as session:
+        async with driver.session() as session:
             result = await session.run("""
                 MATCH (e:Entity {name: $name})
                 RETURN e.name as name, e.entity_type as type, 
@@ -55,12 +134,7 @@ class KnowledgeGraph:
             
             record = await result.single()
             if record:
-                props = {}
-                try:
-                    props = json.loads(record["properties"]) if record["properties"] else {}
-                except:
-                    pass
-                
+                props = self._parse_properties(record["properties"])
                 return {
                     "name": record["name"],
                     "type": record["type"],
@@ -81,10 +155,12 @@ class KnowledgeGraph:
         await self.connect()
         
         results = []
-        if not self._driver:
+        driver = self._driver
+        
+        if not driver:
             return results
         
-        async with self._driver.session() as session:
+        async with driver.session() as session:
             result = await session.run("""
                 MATCH (e:Entity)
                 WHERE e.trust_score >= $min_trust
@@ -98,12 +174,7 @@ class KnowledgeGraph:
             """, {"query": query, "min_trust": min_trust, "limit": limit})
             
             async for record in result:
-                props = {}
-                try:
-                    props = json.loads(record["properties"]) if record["properties"] else {}
-                except:
-                    pass
-                
+                props = self._parse_properties(record["properties"])
                 results.append({
                     "name": record["name"],
                     "type": record["type"],
@@ -127,10 +198,11 @@ class KnowledgeGraph:
             "other": [],
         }
         
-        if not self._driver:
+        driver = self._driver
+        if not driver:
             return relations
         
-        async with self._driver.session() as session:
+        async with driver.session() as session:
             # Outgoing relations
             result = await session.run("""
                 MATCH (e:Entity {name: $name})-[r]->(target:Entity)
@@ -184,16 +256,19 @@ class KnowledgeGraph:
         await self.connect()
         
         chain = []
-        if not self._driver:
+        driver = self._driver
+        
+        if not driver:
             return chain
         
-        async with self._driver.session() as session:
-            result = await session.run("""
-                MATCH path = (e:Entity {name: $name})-[:depends_on*1..""" + str(max_depth) + """]->(dep:Entity)
+        async with driver.session() as session:
+            query = f"""
+                MATCH path = (e:Entity {{name: $name}})-[:depends_on*1..{max_depth}]->(dep:Entity)
                 RETURN dep.name as name, dep.description as description,
                        length(path) as depth
                 ORDER BY depth
-            """, {"name": name})
+            """
+            result = await session.run(query, {"name": name})
             
             async for record in result:
                 chain.append({
@@ -215,10 +290,11 @@ class KnowledgeGraph:
             "entity_types": {},
         }
         
-        if not self._driver:
+        driver = self._driver
+        if not driver:
             return stats
         
-        async with self._driver.session() as session:
+        async with driver.session() as session:
             # Entity count
             result = await session.run("MATCH (n:Entity) RETURN count(n) as count")
             record = await result.single()
@@ -244,4 +320,19 @@ class KnowledgeGraph:
                 stats["entity_types"][record["type"] or "unknown"] = record["count"]
         
         return stats
-
+    
+    @staticmethod
+    def _parse_properties(properties_data) -> Dict[str, Any]:
+        """Parse properties from Neo4j record."""
+        if not properties_data:
+            return {}
+        
+        try:
+            if isinstance(properties_data, str):
+                return json.loads(properties_data)
+            elif isinstance(properties_data, dict):
+                return properties_data
+        except (json.JSONDecodeError, TypeError):
+            pass
+        
+        return {}

@@ -15,13 +15,14 @@ import asyncio
 from typing import Any, Dict, List, Optional, AsyncGenerator
 from datetime import datetime
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, APIRouter
 from fastapi.responses import StreamingResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from ..config import config
 from ..knowledge.graph import KnowledgeGraph
+from .mcp_tools import MCP_TOOLS, MCPToolExecutor
 
 
 # ==================== App Setup ====================
@@ -46,210 +47,21 @@ app.add_middleware(
 # ==================== MCP Schema ====================
 
 class MCPCapabilities(BaseModel):
+    """MCP server capabilities."""
     tools: Dict[str, bool] = {"listTools": True, "call": True}
     resources: Dict[str, bool] = {"list": True, "read": True}
 
 
 class MCPServerInfo(BaseModel):
+    """MCP server information."""
     name: str = "mcp-knowledge-graph"
     version: str = "1.0.0"
     protocolVersion: str = "2024-11-05"
     capabilities: MCPCapabilities = Field(default_factory=MCPCapabilities)
 
 
-class MCPTool(BaseModel):
-    name: str
-    description: str
-    inputSchema: Dict[str, Any]
-
-
-# ==================== MCP Tools Definition ====================
-
-MCP_TOOLS: List[MCPTool] = [
-    MCPTool(
-        name="search_knowledge",
-        description="Search the knowledge graph for verified information. Returns entities with trust scores, descriptions, and metadata.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Search query (keyword or natural language)"
-                },
-                "min_trust": {
-                    "type": "number",
-                    "description": "Minimum trust score (0-1, default 0.7)",
-                    "default": 0.7
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum results (default 10)",
-                    "default": 10
-                }
-            },
-            "required": ["query"]
-        }
-    ),
-    MCPTool(
-        name="get_context",
-        description="Get complete context for a topic including dependencies, alternatives, integrations, and installation instructions.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "topic": {
-                    "type": "string",
-                    "description": "Topic name to get context for"
-                }
-            },
-            "required": ["topic"]
-        }
-    ),
-    MCPTool(
-        name="get_dependencies",
-        description="Get the dependency chain for a technology. Useful for determining installation order.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Technology/library name"
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "description": "Maximum traversal depth (default 3)",
-                    "default": 3
-                }
-            },
-            "required": ["name"]
-        }
-    ),
-    MCPTool(
-        name="get_alternatives",
-        description="Get alternative technologies/tools for comparison.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Technology name to find alternatives for"
-                }
-            },
-            "required": ["name"]
-        }
-    ),
-    MCPTool(
-        name="get_best_practices",
-        description="Get best practices, common pitfalls, and recommendations for a technology.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Technology name"
-                }
-            },
-            "required": ["name"]
-        }
-    ),
-    MCPTool(
-        name="get_stats",
-        description="Get knowledge graph statistics including entity counts, relation counts, and trust score distribution.",
-        inputSchema={
-            "type": "object",
-            "properties": {},
-        }
-    ),
-    MCPTool(
-        name="infer_relation",
-        description="Infer the relationship between two technologies or concepts using graph traversal.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "source": {
-                    "type": "string",
-                    "description": "First technology/concept name"
-                },
-                "target": {
-                    "type": "string",
-                    "description": "Second technology/concept name"
-                }
-            },
-            "required": ["source", "target"]
-        }
-    ),
-    MCPTool(
-        name="find_path",
-        description="Find connection paths between two technologies in the knowledge graph.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "source": {
-                    "type": "string",
-                    "description": "Starting technology name"
-                },
-                "target": {
-                    "type": "string",
-                    "description": "Target technology name"
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "description": "Maximum path depth (default 4)",
-                    "default": 4
-                }
-            },
-            "required": ["source", "target"]
-        }
-    ),
-    MCPTool(
-        name="recommend",
-        description="Get technology recommendations based on graph relationships.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "technology": {
-                    "type": "string",
-                    "description": "Base technology to get recommendations for"
-                },
-                "type": {
-                    "type": "string",
-                    "description": "Recommendation type: all, alternative, complement",
-                    "enum": ["all", "alternative", "complement"],
-                    "default": "all"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum recommendations (default 10)",
-                    "default": 10
-                }
-            },
-            "required": ["technology"]
-        }
-    ),
-    MCPTool(
-        name="find_similar",
-        description="Find similar technologies based on category and tags.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "technology": {
-                    "type": "string",
-                    "description": "Technology to find similar ones for"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum results (default 10)",
-                    "default": 10
-                }
-            },
-            "required": ["technology"]
-        }
-    ),
-]
-
-
 # ==================== MCP Router ====================
 
-from fastapi import APIRouter
 mcp_router = APIRouter(prefix="/mcp", tags=["mcp"])
 
 
@@ -273,9 +85,10 @@ async def call_tool(request: Request):
     arguments = body.get("arguments", {})
     
     graph = KnowledgeGraph()
+    executor = MCPToolExecutor(graph)
     
     try:
-        result = await _execute_tool(graph, tool_name, arguments)
+        result = await executor.execute(tool_name, arguments)
         return {
             "content": [{
                 "type": "text",
@@ -289,114 +102,6 @@ async def call_tool(request: Request):
         }
     finally:
         await graph.disconnect()
-
-
-async def _execute_tool(graph: KnowledgeGraph, tool_name: str, args: Dict[str, Any]) -> Any:
-    """Execute a tool and return results."""
-    
-    if tool_name == "search_knowledge":
-        return await graph.search_entities(
-            query=args.get("query", ""),
-            min_trust=args.get("min_trust", 0.7),
-            limit=args.get("limit", 10),
-        )
-    
-    elif tool_name == "get_context":
-        topic = args.get("topic", "")
-        entity = await graph.get_entity(topic)
-        relations = await graph.get_relations(topic)
-        
-        return {
-            "entity": entity,
-            "dependencies": relations.get("depends_on", []),
-            "integrations": relations.get("integrates_with", []),
-            "alternatives": relations.get("alternative_to", []),
-        }
-    
-    elif tool_name == "get_dependencies":
-        return await graph.get_dependency_chain(
-            name=args.get("name", ""),
-            max_depth=args.get("max_depth", 3),
-        )
-    
-    elif tool_name == "get_alternatives":
-        relations = await graph.get_relations(args.get("name", ""))
-        return relations.get("alternative_to", [])
-    
-    elif tool_name == "get_best_practices":
-        # Return stored best practices or empty
-        entity = await graph.get_entity(args.get("name", ""))
-        if entity:
-            props = entity.get("properties", {})
-            return {
-                "name": entity.get("name"),
-                "key_features": props.get("key_features", []),
-                "use_cases": props.get("use_cases", []),
-                "limitations": props.get("limitations", []),
-                "installation": props.get("installation", ""),
-            }
-        return {"message": "No best practices found for this topic"}
-    
-    elif tool_name == "get_stats":
-        return await graph.get_stats()
-    
-    elif tool_name == "infer_relation":
-        from ..knowledge.inference import GraphInference
-        inference = GraphInference()
-        result = await inference.find_relation(
-            source=args.get("source", ""),
-            target=args.get("target", ""),
-        )
-        return {
-            "query": result.query,
-            "result": result.result,
-            "confidence": result.confidence,
-            "reasoning": result.reasoning_path,
-        }
-    
-    elif tool_name == "find_path":
-        from ..knowledge.inference import GraphInference
-        inference = GraphInference()
-        result = await inference.find_path(
-            source=args.get("source", ""),
-            target=args.get("target", ""),
-            max_depth=args.get("max_depth", 4),
-        )
-        return {
-            "query": result.query,
-            "result": result.result,
-            "confidence": result.confidence,
-        }
-    
-    elif tool_name == "recommend":
-        from ..knowledge.inference import GraphInference
-        inference = GraphInference()
-        result = await inference.recommend(
-            technology=args.get("technology", ""),
-            relation_type=args.get("type", "all"),
-            limit=args.get("limit", 10),
-        )
-        return {
-            "query": result.query,
-            "result": result.result,
-            "confidence": result.confidence,
-        }
-    
-    elif tool_name == "find_similar":
-        from ..knowledge.inference import GraphInference
-        inference = GraphInference()
-        result = await inference.find_similar(
-            technology=args.get("technology", ""),
-            limit=args.get("limit", 10),
-        )
-        return {
-            "query": result.query,
-            "result": result.result,
-            "confidence": result.confidence,
-        }
-    
-    else:
-        raise ValueError(f"Unknown tool: {tool_name}")
 
 
 @mcp_router.get("/resources/list")
@@ -593,7 +298,6 @@ async def collect_knowledge(request: CollectRequest):
     - person: 인물/조직
     """
     try:
-        # 새로운 수집기 import (agents 패키지에서)
         import sys
         sys.path.insert(0, "/data/apps/agents/src")
         from knowledge.collectors import UnifiedCollector
@@ -624,41 +328,167 @@ async def collect_knowledge(request: CollectRequest):
 
 @app.get("/knowledge/categories")
 async def list_categories():
-    """사용 가능한 카테고리 목록."""
-    return {
-        "categories": [
-            {
-                "id": "technology",
-                "name": "Technology",
-                "description": "프레임워크, 라이브러리, 도구 등 기술 정보",
-                "examples": ["langchain", "ollama", "qdrant"]
-            },
-            {
-                "id": "asset",
-                "name": "Asset",
-                "description": "암호화폐, 주식 등 투자 자산 정보",
-                "examples": ["bitcoin", "ethereum", "solana"]
-            },
-            {
-                "id": "news",
-                "name": "News",
-                "description": "뉴스, 기사, 공지사항",
-                "sources": ["Hacker News", "CoinDesk"]
-            },
-            {
-                "id": "concept",
-                "name": "Concept",
-                "description": "개념, 용어, 정의",
-                "examples": ["RAG", "DeFi", "LLM"]
-            },
-            {
-                "id": "person",
-                "name": "Person/Organization",
-                "description": "인물, 조직, 회사 정보",
-                "examples": ["Vitalik Buterin", "OpenAI", "LangChain Inc"]
-            },
-        ]
+    """
+    사용 가능한 카테고리 목록.
+    Neo4j에서 실제 사용 중인 entity_type들을 동적으로 조회합니다.
+    """
+    # 기본 카테고리 정의 (그룹핑용)
+    CATEGORY_GROUPS = {
+        "technology": {
+            "name": "Technology",
+            "description": "프레임워크, 라이브러리, 도구 등 기술 정보",
+            "types": ["technology", "framework", "model", "service", "tool", "language", "pattern", "best_practice", "project"],
+            "icon": "🔧"
+        },
+        "asset": {
+            "name": "Asset",
+            "description": "암호화폐, 주식 등 투자 자산 정보",
+            "types": ["asset", "cryptocurrency", "stock", "etf", "commodity"],
+            "icon": "💰"
+        },
+        "news": {
+            "name": "News",
+            "description": "뉴스, 기사, 공지사항",
+            "types": ["news", "article", "research_paper", "document"],
+            "icon": "📰"
+        },
+        "concept": {
+            "name": "Concept",
+            "description": "개념, 용어, 정의",
+            "types": ["concept", "topic", "fact"],
+            "icon": "💡"
+        },
+        "person": {
+            "name": "Person/Organization",
+            "description": "인물, 조직, 회사 정보",
+            "types": ["person", "organization"],
+            "icon": "👥"
+        },
+        "event": {
+            "name": "Event",
+            "description": "이벤트, 장소 정보",
+            "types": ["event", "location"],
+            "icon": "📅"
+        },
+        "product": {
+            "name": "Product",
+            "description": "제품, 서비스",
+            "types": ["product"],
+            "icon": "📦"
+        },
     }
+    
+    # Neo4j에서 실제 사용 중인 entity_type 조회
+    graph = KnowledgeGraph()
+    try:
+        result = await graph.run_query(
+            """
+            MATCH (e:Entity)
+            RETURN DISTINCT e.entity_type as entity_type, count(e) as count
+            ORDER BY count DESC
+            """
+        )
+        
+        # 동적으로 발견된 타입들
+        discovered_types = {r["entity_type"]: r["count"] for r in result if r.get("entity_type")}
+        
+        # 카테고리 목록 생성 (그룹별로)
+        categories = []
+        used_types = set()
+        
+        for group_id, group_info in CATEGORY_GROUPS.items():
+            group_types = group_info["types"]
+            matching_types = []
+            total_count = 0
+            
+            for t in group_types:
+                if t in discovered_types:
+                    matching_types.append({"type": t, "count": discovered_types[t]})
+                    total_count += discovered_types[t]
+                    used_types.add(t)
+            
+            if matching_types:
+                categories.append({
+                    "id": group_id,
+                    "name": group_info["name"],
+                    "description": group_info["description"],
+                    "icon": group_info["icon"],
+                    "types": matching_types,
+                    "total_count": total_count
+                })
+        
+        # 그룹에 속하지 않은 새로운 타입들 (자동 발견)
+        new_types = []
+        for entity_type, count in discovered_types.items():
+            if entity_type and entity_type not in used_types:
+                new_types.append({"type": entity_type, "count": count})
+        
+        if new_types:
+            categories.append({
+                "id": "other",
+                "name": "Other",
+                "description": "기타 자동 발견된 카테고리",
+                "icon": "🏷️",
+                "types": new_types,
+                "total_count": sum(t["count"] for t in new_types)
+            })
+        
+        # 총 엔티티 수
+        total_entities = sum(c["total_count"] for c in categories)
+        
+        return {
+            "categories": categories,
+            "total_entity_types": len(discovered_types),
+            "total_entities": total_entities
+        }
+        
+    except Exception as e:
+        # 에러 시 기본 정적 목록 반환
+        return {
+            "categories": [
+                {"id": "technology", "name": "Technology", "description": "프레임워크, 라이브러리, 도구 등 기술 정보", "icon": "🔧"},
+                {"id": "asset", "name": "Asset", "description": "암호화폐, 주식 등 투자 자산 정보", "icon": "💰"},
+                {"id": "news", "name": "News", "description": "뉴스, 기사, 공지사항", "icon": "📰"},
+                {"id": "concept", "name": "Concept", "description": "개념, 용어, 정의", "icon": "💡"},
+                {"id": "person", "name": "Person/Organization", "description": "인물, 조직, 회사 정보", "icon": "👥"},
+            ],
+            "error": str(e)
+        }
+    finally:
+        await graph.disconnect()
+
+
+@app.get("/knowledge/entity-types")
+async def list_entity_types():
+    """
+    모든 entity_type 목록과 개수를 반환합니다.
+    프론트엔드 필터에서 사용 가능한 모든 타입을 표시합니다.
+    """
+    graph = KnowledgeGraph()
+    try:
+        result = await graph.run_query(
+            """
+            MATCH (e:Entity)
+            WHERE e.entity_type IS NOT NULL
+            RETURN DISTINCT e.entity_type as entity_type, count(e) as count
+            ORDER BY count DESC
+            """
+        )
+        
+        entity_types = [
+            {"type": r["entity_type"], "count": r["count"]}
+            for r in result if r.get("entity_type")
+        ]
+        
+        return {
+            "entity_types": entity_types,
+            "total_types": len(entity_types),
+            "total_entities": sum(t["count"] for t in entity_types)
+        }
+    except Exception as e:
+        return {"entity_types": [], "error": str(e)}
+    finally:
+        await graph.disconnect()
 
 
 @app.get("/knowledge/entities/by-type/{entity_type}")
@@ -666,15 +496,16 @@ async def get_entities_by_type(entity_type: str, limit: int = 50):
     """특정 타입의 엔티티 조회."""
     graph = KnowledgeGraph()
     try:
-        # Neo4j에서 타입별 조회
-        query = """
-        MATCH (e:Entity)
-        WHERE e.entity_type = $entity_type
-        RETURN e
-        ORDER BY e.trust_score DESC
-        LIMIT $limit
-        """
-        result = await graph.run_query(query, {"entity_type": entity_type, "limit": limit})
+        result = await graph.run_query(
+            """
+            MATCH (e:Entity)
+            WHERE e.entity_type = $entity_type
+            RETURN e
+            ORDER BY e.trust_score DESC
+            LIMIT $limit
+            """,
+            {"entity_type": entity_type, "limit": limit}
+        )
         return {"entities": result, "count": len(result)}
     except Exception as e:
         return {"entities": [], "error": str(e)}
@@ -696,15 +527,13 @@ async def market_overview():
         return {"error": str(e)}
 
 
-# Register MCP router
+# ==================== Register Routers ====================
+
 app.include_router(mcp_router)
 
-
-# ==================== Knowledge Graph Viewer ====================
-# 시각화 페이지 (viewer.py에서 import)
+# Knowledge Graph Viewer
 try:
     from .viewer import router as viewer_router
     app.include_router(viewer_router, prefix="/knowledge")
 except ImportError:
     pass
-
