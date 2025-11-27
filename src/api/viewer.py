@@ -414,7 +414,7 @@ VIEWER_HTML = r"""
     </div>
     
     <div class="panel stats-panel" id="stats-panel">
-        <div class="panel-header" onclick="togglePanel('stats-panel')">
+        <div class="panel-header" id="stats-header">
             <h3>📊 통계</h3>
             <div class="collapse-btn">▼</div>
         </div>
@@ -435,7 +435,7 @@ VIEWER_HTML = r"""
     </div>
     
     <div class="panel legend-panel" id="legend-panel">
-        <div class="panel-header" onclick="togglePanel('legend-panel')">
+        <div class="panel-header" id="legend-header">
             <h3>🎨 범례</h3>
             <div class="collapse-btn">▼</div>
         </div>
@@ -445,11 +445,11 @@ VIEWER_HTML = r"""
     </div>
     
     <div class="panel info-panel" id="info-panel">
-        <div class="close-btn" onclick="closeInfoPanel()">✕</div>
+        <div class="close-btn" id="info-close-btn">✕</div>
         <div class="node-info" id="node-info"></div>
     </div>
     
-    <div class="mobile-toggle" onclick="toggleAllPanels()">☰</div>
+    <div class="mobile-toggle" id="mobile-toggle-btn">☰</div>
 
     <script>
         const TYPE_COLORS = {
@@ -692,7 +692,49 @@ VIEWER_HTML = r"""
             }
         });
         
+        // 이벤트 리스너 등록
+        function setupEventListeners() {
+            // 패널 헤더 클릭 이벤트
+            document.getElementById('stats-header').addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                togglePanel('stats-panel');
+            });
+            
+            document.getElementById('legend-header').addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                togglePanel('legend-panel');
+            });
+            
+            // 정보 패널 닫기 버튼
+            document.getElementById('info-close-btn').addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeInfoPanel();
+            });
+            
+            // 모바일 토글 버튼
+            document.getElementById('mobile-toggle-btn').addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleAllPanels();
+            });
+            
+            // 터치 이벤트 지원 (모바일)
+            document.getElementById('stats-header').addEventListener('touchend', function(e) {
+                e.preventDefault();
+                togglePanel('stats-panel');
+            });
+            
+            document.getElementById('legend-header').addEventListener('touchend', function(e) {
+                e.preventDefault();
+                togglePanel('legend-panel');
+            });
+        }
+        
         // 초기화
+        setupEventListeners();
         restorePanelStates();
         loadData();
     </script>
