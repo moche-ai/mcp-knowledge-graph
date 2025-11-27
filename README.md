@@ -124,6 +124,7 @@ curl -X POST https://mcp.moche.ai/mcp/tools/call \
 | `/knowledge/infer/path` | GET | Find paths between concepts |
 | `/knowledge/recommend/{name}` | GET | Get recommendations |
 | `/knowledge/similar/{name}` | GET | Find similar technologies |
+| `/knowledge/viewer` | GET | 3D Knowledge Graph Viewer |
 | `/docs` | GET | OpenAPI documentation |
 
 ## Configuration
@@ -173,6 +174,7 @@ If you find this project helpful, consider supporting its development:
 ## Links
 
 - 🌐 **Live Server**: https://mcp.moche.ai
+- 🧠 **Knowledge Graph Viewer**: https://mcp.moche.ai/knowledge/viewer
 - 📖 **API Docs**: https://mcp.moche.ai/docs
 - 🔗 **GitHub**: https://github.com/moche-ai/mcp-knowledge-graph
 
