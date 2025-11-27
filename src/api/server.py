@@ -571,6 +571,140 @@ async def find_similar(technology: str, limit: int = 10):
     }
 
 
+# ==================== Collection API ====================
+
+class CollectRequest(BaseModel):
+    """수집 요청 모델."""
+    categories: Optional[List[str]] = None
+    technologies: Optional[List[str]] = None
+    assets: Optional[List[str]] = None
+
+
+@app.post("/knowledge/collect")
+async def collect_knowledge(request: CollectRequest):
+    """
+    지식 수집 트리거.
+    
+    Categories:
+    - technology: 기술/라이브러리 정보
+    - asset: 암호화폐/투자 자산
+    - news: 뉴스/기사
+    - concept: 개념/용어
+    - person: 인물/조직
+    """
+    try:
+        # 새로운 수집기 import (agents 패키지에서)
+        import sys
+        sys.path.insert(0, "/data/apps/agents/src")
+        from knowledge.collectors import UnifiedCollector
+        from knowledge.store import KnowledgeStore
+        
+        store = KnowledgeStore()
+        collector = UnifiedCollector(store)
+        
+        results = await collector.collect_all(
+            save=True,
+            categories=request.categories
+        )
+        
+        return {
+            "status": "success",
+            "collected": {cat: len(entities) for cat, entities in results.items()},
+            "total": sum(len(e) for e in results.values()),
+        }
+    except ImportError as e:
+        return {
+            "status": "error",
+            "message": f"Collector not available: {e}",
+            "hint": "Run from agents container or install knowledge collectors"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge/categories")
+async def list_categories():
+    """사용 가능한 카테고리 목록."""
+    return {
+        "categories": [
+            {
+                "id": "technology",
+                "name": "Technology",
+                "description": "프레임워크, 라이브러리, 도구 등 기술 정보",
+                "examples": ["langchain", "ollama", "qdrant"]
+            },
+            {
+                "id": "asset",
+                "name": "Asset",
+                "description": "암호화폐, 주식 등 투자 자산 정보",
+                "examples": ["bitcoin", "ethereum", "solana"]
+            },
+            {
+                "id": "news",
+                "name": "News",
+                "description": "뉴스, 기사, 공지사항",
+                "sources": ["Hacker News", "CoinDesk"]
+            },
+            {
+                "id": "concept",
+                "name": "Concept",
+                "description": "개념, 용어, 정의",
+                "examples": ["RAG", "DeFi", "LLM"]
+            },
+            {
+                "id": "person",
+                "name": "Person/Organization",
+                "description": "인물, 조직, 회사 정보",
+                "examples": ["Vitalik Buterin", "OpenAI", "LangChain Inc"]
+            },
+        ]
+    }
+
+
+@app.get("/knowledge/entities/by-type/{entity_type}")
+async def get_entities_by_type(entity_type: str, limit: int = 50):
+    """특정 타입의 엔티티 조회."""
+    graph = KnowledgeGraph()
+    try:
+        # Neo4j에서 타입별 조회
+        query = """
+        MATCH (e:Entity)
+        WHERE e.entity_type = $entity_type
+        RETURN e
+        ORDER BY e.trust_score DESC
+        LIMIT $limit
+        """
+        result = await graph.run_query(query, {"entity_type": entity_type, "limit": limit})
+        return {"entities": result, "count": len(result)}
+    except Exception as e:
+        return {"entities": [], "error": str(e)}
+    finally:
+        await graph.disconnect()
+
+
+@app.get("/knowledge/market/overview")
+async def market_overview():
+    """암호화폐 시장 개요."""
+    try:
+        import sys
+        sys.path.insert(0, "/data/apps/agents/src")
+        from knowledge.collectors import AssetCollector
+        
+        collector = AssetCollector()
+        return await collector.collect_market_overview()
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # Register MCP router
 app.include_router(mcp_router)
+
+
+# ==================== Knowledge Graph Viewer ====================
+# 시각화 페이지 (viewer.py에서 import)
+try:
+    from .viewer import router as viewer_router
+    app.include_router(viewer_router, prefix="/knowledge")
+except ImportError:
+    pass
 
