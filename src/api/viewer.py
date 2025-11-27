@@ -1,4 +1,4 @@
-"""Knowledge Graph 3D Viewer - 시각화 페이지 및 데이터 API."""
+"""Knowledge Graph 3D Viewer - Visualization Page and Data API."""
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
@@ -6,13 +6,13 @@ import os
 
 router = APIRouter()
 
-# Neo4j 연결 설정
+# Neo4j connection settings
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 
 async def get_neo4j_session():
-    """Neo4j 세션 생성."""
+    """Create Neo4j session."""
     try:
         from neo4j import AsyncGraphDatabase
         driver = AsyncGraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
@@ -24,7 +24,7 @@ async def get_neo4j_session():
 
 @router.get("/graph-data")
 async def get_graph_data():
-    """그래프 시각화용 노드/링크 데이터 반환."""
+    """Return node/link data for graph visualization."""
     driver = await get_neo4j_session()
     if not driver:
         return {"nodes": [], "links": []}
@@ -410,25 +410,25 @@ VIEWER_HTML = r"""
     <div id="graph"></div>
     
     <div class="search-box">
-        <input type="text" id="search" placeholder="🔍 검색어 입력..." />
+        <input type="text" id="search" placeholder="🔍 Search..." />
     </div>
     
     <div class="panel stats-panel" id="stats-panel">
         <div class="panel-header" id="stats-header">
-            <h3>📊 통계</h3>
+            <h3>📊 Stats</h3>
             <div class="collapse-btn">▼</div>
         </div>
         <div class="panel-content">
             <div class="stat-row">
-                <span>총 노드</span>
+                <span>Nodes</span>
                 <span class="stat-value" id="node-count">0</span>
             </div>
             <div class="stat-row">
-                <span>총 링크</span>
+                <span>Links</span>
                 <span class="stat-value" id="link-count">0</span>
             </div>
             <div class="stat-row">
-                <span>카테고리</span>
+                <span>Categories</span>
                 <span class="stat-value" id="type-count">0</span>
             </div>
         </div>
@@ -436,7 +436,7 @@ VIEWER_HTML = r"""
     
     <div class="panel legend-panel" id="legend-panel">
         <div class="panel-header" id="legend-header">
-            <h3>🎨 범례</h3>
+            <h3>🎨 Legend</h3>
             <div class="collapse-btn">▼</div>
         </div>
         <div class="panel-content">
@@ -562,7 +562,7 @@ VIEWER_HTML = r"""
                 
                 renderGraph();
             } catch (error) {
-                console.error('데이터 로드 실패:', error);
+                console.error('Failed to load data:', error);
             }
         }
         
@@ -623,7 +623,7 @@ VIEWER_HTML = r"""
                         <h4>${node.name}</h4>
                         <p><strong>Type:</strong> ${node.type}</p>
                         <p><strong>Trust Score:</strong> ${((node.trust_score || 0.5) * 100).toFixed(0)}%</p>
-                        <p>${node.description || '설명 없음'}</p>
+                        <p>${node.description || 'No description'}</p>
                         ${propsHtml ? `<div style="margin-top:8px;">${propsHtml}</div>` : ''}
                     `;
                     infoPanel.classList.add('active');
@@ -745,6 +745,6 @@ VIEWER_HTML = r"""
 
 @router.get("/viewer", response_class=HTMLResponse)
 async def knowledge_graph_viewer():
-    """지식 그래프 3D 시각화 페이지."""
+    """Knowledge Graph 3D Visualization Page."""
     return VIEWER_HTML
 
